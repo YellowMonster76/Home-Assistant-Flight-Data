@@ -6,8 +6,7 @@
 
   # Nearest aircraft that is close AND low enough to be worth showing on the
   # Awtrix displays. Resolves to 'off' when nothing qualifies, which the
-  # "Awtrix plane on/off" automation uses to remove the app entirely -- the same
-  # pattern as sensor.awtrix_charging.
+  # "Awtrix plane on/off" automation uses to remove the app entirely.
   #
   # Thresholds are helpers, not constants, so they can be tuned from the Flights
   # tab. Starting values (5 km / 3,000 m) are a guess: at a 20 km radius with no
