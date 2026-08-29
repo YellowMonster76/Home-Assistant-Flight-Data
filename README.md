@@ -20,12 +20,30 @@ It authenticates with HTTP basic auth, which OpenSky has retired:
 
 > *"OpenSky exclusively supports the OAuth2 client credentials flow. Basic
 > authentication with username and password is no longer accepted."*
+> — [OpenSky REST API docs](https://openskynetwork.github.io/opensky-api/rest.html)
 
 So it silently falls back to the **anonymous tier — 400 credits/day** instead of
-4,000, and adding credentials changes nothing. You can verify this yourself: an
-authenticated request and an anonymous one draw from the same IP-based bucket.
+4,000, and adding credentials to the integration changes nothing. There is no
+error; it simply keeps working at a tenth of the allowance.
 
-This project does the OAuth2 exchange properly and gets the full allowance.
+You can confirm it on your own install: make one request with your credentials
+and one without, and compare `x-rate-limit-remaining` in the response headers.
+Both draw from the same IP-based anonymous bucket.
+
+This is known upstream —
+[home-assistant/core#156643](https://github.com/home-assistant/core/issues/156643),
+opened November 2025. The integration's code owner acknowledged it and noted the
+new client-credentials scheme, but had no time to implement it:
+
+> *"It's on my list but I have little time to look into it, happy to support
+> anyone who wants to help out though."*
+
+The issue has since been **closed twice by the stale bot rather than by a fix**,
+so a closed issue there should not be read as resolved. As of writing, the
+integration still uses basic auth.
+
+This project does the OAuth2 client-credentials exchange properly and gets the
+full 4,000/day allowance.
 
 ---
 
