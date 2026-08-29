@@ -1,0 +1,157 @@
+# Flight tracker - Home Assistant configuration
+#
+# Add these blocks to your configuration.yaml. If you already have
+# command_line:, input_number: or input_boolean: sections, merge the entries in
+# rather than repeating the top-level key.
+
+command_line:
+  # Enriches whichever aircraft currently qualifies for the Awtrix plane app
+  # with airline, type and route. Deliberately never self-polls (scan_interval
+  # is a day): the "Plane details - refresh on new aircraft" automation calls
+  # update_entity only when the callsign CHANGES, and the script caches by
+  # callsign for 6 h. A flyover therefore costs one API request, not one per
+  # 30-second OpenSky poll -- the free plan allows 2,400/month.
+  - sensor:
+      name: Plane Details
+      unique_id: plane_details_aerodatabox
+      # Unquoted deliberately: quoting an empty argument made HA execute this
+      # via a shell that could not find python3 (exit code 127). "-" stands in
+      # for "no aircraft", which the script recognises.
+      # Every template MUST stay on one line at the same indentation. In a YAML
+      # folded scalar a more-indented continuation line is preserved literally
+      # rather than folded, which injected a newline mid-command and made HA
+      # fail with exit code 127. Caught 2026-08-29.
+      command: >-
+        python3 /config/bin/aerodatabox_lookup.py
+        {{ state_attr('sensor.awtrix_plane', 'callsign') | default('-', true) or '-' }}
+        {{ ((state_attr('sensor.awtrix_plane', 'altitude_k') | default('0', true) | replace('k','') | float(0)) * 1000) | round(0) | int }}
+        {{ state_attr('sensor.opensky_flights', 'nearest_km') | default(0, true) or 0 }}
+        {{ state_attr('sensor.awtrix_plane', 'icao24') | default('-', true) or '-' }}
+      value_template: "{{ value_json.airline | default('none', true) }}"
+      json_attributes:
+        - airline
+        - flight_number
+        - aircraft_model
+        - registration
+        - origin
+        - origin_name
+        - destination
+        - destination_name
+        - status
+        - callsign
+        - cached
+        - ok
+        - reason
+        - adb_requests_remaining
+        - adb_requests_limit
+        - adb_units_remaining
+        - adb_units_limit
+      scan_interval: 86400
+      command_timeout: 45
+
+  # Reads back the sighting log written by the enrichment script. No API cost --
+  # it only reads a local file. Driven by the same automation that refreshes
+  # plane_details, so the card updates as soon as a new flight is logged.
+  - sensor:
+      name: Plane Log
+      unique_id: plane_log_recent
+      command: "python3 /config/bin/plane_log_read.py 15"
+      value_template: "{{ value_json.today }}"
+      unit_of_measurement: "today"
+      json_attributes:
+        - flights
+        - today
+        - total_logged
+        - last
+      scan_interval: 86400
+      command_timeout: 20
+
+  - sensor:
+      name: OpenSky Flights
+      unique_id: opensky_flights_rest
+      # Templated, so it re-renders every poll: change any helper in the UI
+      # and the next poll uses it. Credentials are NOT here -- the script reads
+      # them from secrets.yaml, which is what allows this to be a template.
+      command: >-
+        python3 /config/bin/opensky_states.py
+        {{ states('input_number.opensky_latitude') }}
+        {{ states('input_number.opensky_longitude') }}
+        {{ states('input_number.opensky_radius') | int }}
+        {{ states('input_number.opensky_max_altitude') | int }}
+      value_template: "{{ value_json.count }}"
+      unit_of_measurement: "flights"
+      json_attributes:
+        - aircraft
+        - callsigns
+        - airlines
+        - nearest_km
+        - credits_remaining
+        - radius_m
+        - max_altitude_m
+        - excluded_above_ceiling
+        - error
+      scan_interval: 86400
+      # Kept below the 30s poll interval so a hung request cannot span cycles.
+      command_timeout: 25
+
+input_number:
+  opensky_latitude:
+    name: "OpenSky latitude"
+    min: -90
+    max: 90
+    step: 0.00001
+    mode: box
+    icon: mdi:latitude
+
+  opensky_longitude:
+    name: "OpenSky longitude"
+    min: -180
+    max: 180
+    step: 0.00001
+    mode: box
+    icon: mdi:longitude
+
+  opensky_radius:
+    name: "OpenSky radius"
+    min: 500
+    max: 100000
+    step: 500
+    unit_of_measurement: "m"
+    mode: box
+    icon: mdi:radius-outline
+
+  opensky_max_altitude:
+    name: "OpenSky max altitude"
+    min: 0
+    max: 20000
+    step: 100
+    unit_of_measurement: "m"
+    mode: box
+    icon: mdi:altimeter
+
+  plane_alert_distance:
+    name: "Plane alert distance"
+    min: 0.5
+    max: 20
+    step: 0.5
+    unit_of_measurement: "km"
+    mode: box
+    icon: mdi:map-marker-radius
+
+  plane_alert_altitude:
+    name: "Plane alert altitude"
+    min: 250
+    max: 12000
+    step: 250
+    unit_of_measurement: "m"
+    mode: box
+    icon: mdi:altimeter
+
+input_boolean:
+  plane_notify:
+    name: "Plane phone alert"
+    icon: mdi:cellphone-message
+
+  awtrix_plane:
+    name: "Awtrix Plane overhead"
+    icon: mdi:airplane

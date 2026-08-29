@@ -1,0 +1,189 @@
+# Flight tracker - Lovelace view
+#
+# The dashboard tab, as raw YAML. Paste into a YAML-mode dashboard, or use
+# the Raw configuration editor on a storage-mode dashboard.
+# Rendered here from the live config and converted from JSON, so key order
+# may differ from hand-written YAML.
+
+{
+  "title": "Flights",
+  "path": "opensky",
+  "icon": "mdi:airplane",
+  "badges": [],
+  "cards": [
+    {
+      "type": "entities",
+      "title": "Status",
+      "show_header_toggle": false,
+      "entities": [
+        {
+          "entity": "sensor.opensky_flights",
+          "name": "Aircraft in area"
+        },
+        {
+          "type": "attribute",
+          "entity": "sensor.opensky_flights",
+          "attribute": "airlines",
+          "name": "Airlines seen"
+        },
+        {
+          "type": "attribute",
+          "entity": "sensor.opensky_flights",
+          "attribute": "nearest_km",
+          "name": "Nearest",
+          "suffix": " km"
+        },
+        {
+          "type": "section",
+          "label": "In force right now"
+        },
+        {
+          "type": "attribute",
+          "entity": "sensor.opensky_flights",
+          "attribute": "radius_m",
+          "name": "Radius",
+          "suffix": " m"
+        },
+        {
+          "type": "attribute",
+          "entity": "sensor.opensky_flights",
+          "attribute": "max_altitude_m",
+          "name": "Ceiling"
+        },
+        {
+          "type": "attribute",
+          "entity": "sensor.opensky_flights",
+          "attribute": "excluded_above_ceiling",
+          "name": "Excluded above ceiling"
+        },
+        {
+          "type": "attribute",
+          "entity": "sensor.opensky_flights",
+          "attribute": "error",
+          "name": "Error"
+        },
+        {
+          "type": "section",
+          "label": "API quota"
+        },
+        {
+          "type": "attribute",
+          "entity": "sensor.opensky_flights",
+          "attribute": "credits_remaining",
+          "name": "OpenSky credits (of 4,000/day)"
+        },
+        {
+          "type": "attribute",
+          "entity": "sensor.plane_details",
+          "attribute": "adb_units_remaining",
+          "name": "AeroDataBox units (of 600/mo)"
+        },
+        {
+          "type": "attribute",
+          "entity": "sensor.plane_details",
+          "attribute": "adb_requests_remaining",
+          "name": "AeroDataBox requests (of 2,400/mo)"
+        }
+      ]
+    },
+    {
+      "type": "markdown",
+      "title": "Aircraft overhead",
+      "content": "{% set ac = state_attr('sensor.opensky_flights','aircraft') or [] %}{% if states('sensor.opensky_flights') in ['unknown','unavailable'] %}_Sensor not loaded._{% elif states('sensor.opensky_flights') | int(-1) < 0 %}\u26a0\ufe0f **Error:** {{ state_attr('sensor.opensky_flights','error') or 'unknown' }}{% elif ac | count == 0 %}No aircraft within {{ state_attr('sensor.opensky_flights','radius_m') or '?' }} m right now.{% else %}| Airline | Callsign | Dist | Altitude | Speed |\n|:--|:--|--:|--:|--:|\n{% for a in ac %}| {{ a.airline if a.airline else '_private/GA_' }} | {{ a.callsign or a.icao24 }} | {{ a.distance_km }} km | {{ a.altitude_m if a.altitude_m is not none else '-' }} m | {{ ((a.velocity_ms | float(0)) * 3.6) | round(0) | int }} km/h |\n{% endfor %}{% endif %}"
+    },
+    {
+      "type": "markdown",
+      "title": "Recent flights overhead",
+      "content": "{% set fl = state_attr('sensor.plane_log','flights') or [] %}{% if states('sensor.plane_log') in ['unknown','unavailable'] %}_Log sensor not loaded._{% elif fl | count == 0 %}No flights logged yet. Aircraft are recorded when they come within the distance and altitude thresholds.{% else %}**{{ state_attr('sensor.plane_log','today') }} today** \u00b7 {{ state_attr('sensor.plane_log','total_logged') }} logged\n\n| Date | Time | Airline | Flight | Route | Alt |\n|:--|:--|:--|:--|:--|--:|\n{% set ns = namespace(prev='') %}{% for f in fl %}| {% if f.date != ns.prev %}**{{ f.date }}**{% set ns.prev = f.date %}{% endif %} | {{ f.time }} | {{ f.airline if f.airline and f.airline != f.callsign else '_private/GA_' }} | {{ f.callsign }} | {% if f.origin and f.destination and f.origin != 'Unknown' and f.destination != 'Unknown' %}{{ f.origin }}\u2192{{ f.destination }}{% elif f.destination and f.destination != 'Unknown' %}\u2192{{ f.destination }}{% elif f.origin and f.origin != 'Unknown' %}{{ f.origin }}\u2192{% else %}\u2014{% endif %} | {{ (f.altitude_m / 1000) | round(1) if f.altitude_m else '?' }}k |\n{% endfor %}{% endif %}"
+    },
+    {
+      "type": "entities",
+      "title": "Awtrix display",
+      "show_header_toggle": false,
+      "entities": [
+        {
+          "type": "section",
+          "label": "Show a plane on the Awtrix when it is this close and low"
+        },
+        {
+          "entity": "input_number.plane_alert_distance",
+          "name": "Within"
+        },
+        {
+          "entity": "input_number.plane_alert_altitude",
+          "name": "Below"
+        },
+        {
+          "type": "section",
+          "label": "Current"
+        },
+        {
+          "entity": "sensor.awtrix_plane",
+          "name": "Showing"
+        },
+        {
+          "entity": "input_boolean.awtrix_plane",
+          "name": "App active (auto)"
+        },
+        {
+          "entity": "input_boolean.plane_notify",
+          "name": "Also alert my phone"
+        },
+        {
+          "entity": "sensor.plane_details",
+          "name": "Last enrichment"
+        }
+      ]
+    },
+    {
+      "type": "entities",
+      "title": "Search area",
+      "show_header_toggle": false,
+      "entities": [
+        {
+          "type": "section",
+          "label": "Centre point"
+        },
+        {
+          "entity": "input_number.opensky_latitude",
+          "name": "Latitude"
+        },
+        {
+          "entity": "input_number.opensky_longitude",
+          "name": "Longitude"
+        },
+        {
+          "type": "section",
+          "label": "Box size and ceiling"
+        },
+        {
+          "entity": "input_number.opensky_radius",
+          "name": "Radius"
+        },
+        {
+          "entity": "input_number.opensky_max_altitude",
+          "name": "Max altitude (0 = no limit)"
+        },
+        {
+          "type": "section",
+          "label": "Changes apply on the next poll - no restart needed"
+        },
+        {
+          "entity": "automation.opensky_poll_during_active_hours",
+          "name": "Polling enabled (06:00-00:30)"
+        }
+      ]
+    },
+    {
+      "type": "history-graph",
+      "title": "Aircraft count (24h)",
+      "hours_to_show": 24,
+      "entities": [
+        {
+          "entity": "sensor.opensky_flights",
+          "name": "Aircraft"
+        }
+      ]
+    }
+  ]
+}

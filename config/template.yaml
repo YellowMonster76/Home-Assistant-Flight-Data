@@ -1,0 +1,111 @@
+# Flight tracker - template sensor
+#
+# Add to your template.yaml (or the template: section of configuration.yaml).
+# Decides which aircraft, if any, is worth showing: the nearest one inside the
+# distance and altitude thresholds. Resolves to 'off' when nothing qualifies.
+
+  # Nearest aircraft that is close AND low enough to be worth showing on the
+  # Awtrix displays. Resolves to 'off' when nothing qualifies, which the
+  # "Awtrix plane on/off" automation uses to remove the app entirely -- the same
+  # pattern as sensor.awtrix_charging.
+  #
+  # Thresholds are helpers, not constants, so they can be tuned from the Flights
+  # tab. Starting values (5 km / 3,000 m) are a guess: at a 20 km radius with no
+  # ceiling there is almost always SOMETHING in the sky, so the point of the
+  # thresholds is to make this occasional rather than permanent.
+  #
+  # Label is the 3-letter operator prefix for airline traffic ("EZY"), or the
+  # full registration for private/GA, which has no operator code. GA is likely
+  # to dominate here, being the low-flying traffic.
+  - sensor:
+      - name: "Awtrix Plane"
+        unique_id: awtrix_plane_overhead
+        default_entity_id: sensor.awtrix_plane
+        icon: mdi:airplane
+        state: >-
+          {%- set ac = state_attr('sensor.opensky_flights', 'aircraft') or [] -%}
+          {%- set maxd = states('input_number.plane_alert_distance') | float(5) -%}
+          {%- set maxa = states('input_number.plane_alert_altitude') | float(3000) -%}
+          {%- set ns = namespace(best=none) -%}
+          {%- for a in ac -%}
+            {%- if a.distance_km is not none and a.altitude_m is not none
+                   and not a.on_ground
+                   and a.distance_km <= maxd and a.altitude_m <= maxa -%}
+              {%- if ns.best is none or a.distance_km < ns.best.distance_km -%}
+                {%- set ns.best = a -%}
+              {%- endif -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {%- if ns.best is none -%}off
+          {%- else -%}
+            {%- set cs = ns.best.callsign or ns.best.icao24 -%}
+            {%- set label = cs[:3] if ns.best.airline else cs -%}
+            {{ label }} {{ (ns.best.altitude_m / 1000) | round(1) }}k
+          {%- endif -%}
+        attributes:
+          # Split out so the Awtrix app can colour the two parts differently.
+          label: >-
+            {%- set ac = state_attr('sensor.opensky_flights', 'aircraft') or [] -%}
+            {%- set maxd = states('input_number.plane_alert_distance') | float(5) -%}
+            {%- set maxa = states('input_number.plane_alert_altitude') | float(3000) -%}
+            {%- set ns = namespace(best=none) -%}
+            {%- for a in ac -%}
+              {%- if a.distance_km is not none and a.altitude_m is not none
+                     and not a.on_ground
+                     and a.distance_km <= maxd and a.altitude_m <= maxa -%}
+                {%- if ns.best is none or a.distance_km < ns.best.distance_km -%}
+                  {%- set ns.best = a -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {%- if ns.best is none -%}
+            {%- else -%}
+              {%- set cs = ns.best.callsign or ns.best.icao24 -%}
+              {{ cs[:3] if ns.best.airline else cs }}
+            {%- endif -%}
+          # Full callsign (not the 3-char label) -- this is what the
+          # AeroDataBox lookup is keyed on.
+          callsign: >-
+            {%- set ac = state_attr('sensor.opensky_flights', 'aircraft') or [] -%}
+            {%- set maxd = states('input_number.plane_alert_distance') | float(5) -%}
+            {%- set maxa = states('input_number.plane_alert_altitude') | float(3000) -%}
+            {%- set ns = namespace(best=none) -%}
+            {%- for a in ac -%}
+              {%- if a.distance_km is not none and a.altitude_m is not none
+                     and not a.on_ground
+                     and a.distance_km <= maxd and a.altitude_m <= maxa -%}
+                {%- if ns.best is none or a.distance_km < ns.best.distance_km -%}
+                  {%- set ns.best = a -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ ns.best.callsign if ns.best is not none and ns.best.callsign else '' }}
+          # Needed for the airframe fallback when there is no flight record.
+          icao24: >-
+            {%- set ac = state_attr('sensor.opensky_flights', 'aircraft') or [] -%}
+            {%- set maxd = states('input_number.plane_alert_distance') | float(5) -%}
+            {%- set maxa = states('input_number.plane_alert_altitude') | float(3000) -%}
+            {%- set ns = namespace(best=none) -%}
+            {%- for a in ac -%}
+              {%- if a.distance_km is not none and a.altitude_m is not none and not a.on_ground and a.distance_km <= maxd and a.altitude_m <= maxa -%}
+                {%- if ns.best is none or a.distance_km < ns.best.distance_km -%}{%- set ns.best = a -%}{%- endif -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ ns.best.icao24 if ns.best is not none else '' }}
+          altitude_k: >-
+            {%- set ac = state_attr('sensor.opensky_flights', 'aircraft') or [] -%}
+            {%- set maxd = states('input_number.plane_alert_distance') | float(5) -%}
+            {%- set maxa = states('input_number.plane_alert_altitude') | float(3000) -%}
+            {%- set ns = namespace(best=none) -%}
+            {%- for a in ac -%}
+              {%- if a.distance_km is not none and a.altitude_m is not none
+                     and not a.on_ground
+                     and a.distance_km <= maxd and a.altitude_m <= maxa -%}
+                {%- if ns.best is none or a.distance_km < ns.best.distance_km -%}
+                  {%- set ns.best = a -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {%- if ns.best is none -%}
+            {%- else -%}{{ (ns.best.altitude_m / 1000) | round(1) }}k
+            {%- endif -%}

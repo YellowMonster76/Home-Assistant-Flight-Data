@@ -1,0 +1,256 @@
+# Flight tracker - automations
+#
+# Add to your automations.yaml. Entity ids referenced here must match the
+# sensors and helpers from configuration.yaml / template.yaml.
+
+- id: plane_details_refresh
+  alias: Plane details - refresh on new aircraft
+  description: >-
+    Calls the AeroDataBox lookup only when the qualifying aircraft CHANGES, not
+    on every OpenSky poll. Combined with the script's 6-hour per-callsign cache,
+    a single flyover costs one API request. The free plan allows 2,400/month and
+    has a strict per-second limit, so this must stay event-driven.
+  trigger:
+  - platform: state
+    entity_id: sensor.awtrix_plane
+    attribute: callsign
+  condition:
+  - condition: template
+    value_template: >-
+      {{ state_attr('sensor.awtrix_plane', 'callsign') not in [none, ''] }}
+  action:
+  - service: homeassistant.update_entity
+    target:
+      entity_id: sensor.plane_details
+  # The lookup writes the sighting log, so re-read it straight afterwards.
+  - delay: '00:00:03'
+  - service: homeassistant.update_entity
+    target:
+      entity_id: sensor.plane_log
+  mode: single
+- id: plane_overhead_notify
+  alias: Plane overhead - notify phone
+  description: >-
+    Pushes to your's phone when an aircraft qualifies for the Awtrix plane app.
+
+    Waits for the AeroDataBox lookup to catch up before sending, so the message
+    carries airline and route rather than just a callsign -- the enrichment is
+    triggered by the same callsign change and lands a few seconds later. If it
+    does not arrive within 20 s the alert is sent anyway with whatever OpenSky
+    gave us, so a slow or failed lookup never suppresses the notification.
+
+    Gated by input_boolean.plane_notify so it can be silenced without disabling
+    the display app. Sent passive (no sound or vibration) -- a plane overhead is
+    a curiosity, not something to interrupt for. Change interruption-level to
+    "active" if it should buzz.
+
+    mode: single so a second aircraft arriving during the 20 s wait is dropped
+    rather than queued -- better to miss one than to send a burst.
+  trigger:
+  - platform: state
+    entity_id: sensor.awtrix_plane
+    attribute: callsign
+  condition:
+  - condition: state
+    entity_id: input_boolean.plane_notify
+    state: 'on'
+  - condition: template
+    value_template: >-
+      {{ state_attr('sensor.awtrix_plane', 'callsign') not in [none, ''] }}
+  action:
+  - variables:
+      cs: "{{ state_attr('sensor.awtrix_plane', 'callsign') }}"
+  # Give the enrichment a chance to resolve this specific callsign.
+  - wait_template: >-
+      {{ state_attr('sensor.plane_details', 'callsign') == cs }}
+    timeout: '00:00:20'
+    continue_on_timeout: true
+  - variables:
+      fresh: "{{ state_attr('sensor.plane_details', 'callsign') == cs }}"
+      airline: "{{ state_attr('sensor.plane_details', 'airline') if fresh else none }}"
+      model: "{{ state_attr('sensor.plane_details', 'aircraft_model') if fresh else none }}"
+      origin: "{{ state_attr('sensor.plane_details', 'origin') if fresh else none }}"
+      dest: "{{ state_attr('sensor.plane_details', 'destination') if fresh else none }}"
+      alt: "{{ state_attr('sensor.awtrix_plane', 'altitude_k') }}"
+  - service: notify.mobile_app_your_phone
+    data:
+      title: >-
+        ✈️ {{ airline if airline else cs }} overhead
+      message: >-
+        {{ cs }}{% if model %} · {{ model }}{% endif %}
+        {%- if origin and dest and origin != 'Unknown' %} · {{ origin }} → {{ dest }}
+        {%- elif dest and dest != 'Unknown' %} · to {{ dest }}
+        {%- endif %} · {{ alt }} up
+      data:
+        # Tapping the notification opens the Flights tab in the HA app.
+        # iOS uses "url"; Android would need "clickAction" instead.
+        url: /lovelace/opensky
+        push:
+          interruption-level: passive
+  mode: single
+- id: awtrix_plane_on_off
+  alias: Awtrix plane on/off
+  description: >-
+    Shows the Awtrix "plane overhead" app while sensor.awtrix_plane has
+    something to report, and removes it when that returns to 'off'. Same pattern
+    as "Awtrix charging on/off" and the 3D printer toggle.
+  trigger:
+  - platform: state
+    entity_id: sensor.awtrix_plane
+  condition:
+  - condition: template
+    value_template: "{{ trigger.to_state.state not in ['unavailable', 'unknown'] }}"
+  action:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: "{{ trigger.to_state.state != 'off' }}"
+      sequence:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.awtrix_plane
+    default:
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.awtrix_plane
+  mode: single
+- id: awtrix_show_plane
+  alias: Awtrix show plane overhead
+  description: >-
+    Appears only while an aircraft is within the distance/altitude thresholds
+    (helpers on the Flights tab). Shows the operator prefix in white and the
+    altitude in amber, e.g. "EZY 0.9k".
+
+    Does NOT use the smarthomejunkie blueprint -- it cannot colour part of the
+    text. Uses AWTRIX coloured text FRAGMENTS rather than draw commands, because
+    draw clips at the panel edge whereas fragments scroll. With the icon this
+    string is ~37px against a 32px panel, so it will scroll; that is expected.
+
+    Rollback: delete this automation and the app disappears once
+    input_boolean.awtrix_plane is turned off.
+  trigger:
+  - platform: state
+    entity_id: input_boolean.awtrix_plane
+    to: 'on'
+    id: 'On'
+  - platform: state
+    entity_id: input_boolean.awtrix_plane
+    to: 'off'
+    id: 'Off'
+  - platform: state
+    entity_id: sensor.awtrix_plane
+    id: Changes
+  # Redraw when the AeroDataBox result arrives, so the app upgrades from the
+  # fallback text to the enriched text without waiting for the next poll.
+  - platform: state
+    entity_id: sensor.plane_details
+    id: Changes
+  variables:
+    topics:
+    - awtrix_display1
+    - awtrix_display2
+    app_name: sensor.awtrix_plane
+  action:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: 'Off'
+      sequence:
+      - repeat:
+          for_each: '{{ topics }}'
+          sequence:
+          - service: mqtt.publish
+            data:
+              topic: '{{ repeat.item }}/custom/{{ app_name }}'
+              payload: ''
+              qos: 0
+              retain: true
+    - conditions:
+      - condition: or
+        conditions:
+        - condition: trigger
+          id: 'On'
+        - condition: and
+          conditions:
+          - condition: trigger
+            id: Changes
+          - condition: state
+            entity_id: input_boolean.awtrix_plane
+            state: 'on'
+          - condition: template
+            value_template: "{{ states('sensor.awtrix_plane') != 'off' }}"
+      sequence:
+      - repeat:
+          for_each: '{{ topics }}'
+          sequence:
+          - service: mqtt.publish
+            data:
+              topic: '{{ repeat.item }}/custom/{{ app_name }}'
+              qos: 0
+              retain: true
+              # Prefers the AeroDataBox enrichment (airline + destination) and
+              # falls back to the OpenSky-only form when that is unavailable --
+              # a private flight, an unknown callsign, or a failed lookup. The
+              # fallback matters: the enrichment is a metered API and must never
+              # be load-bearing.
+              payload: >-
+                {%- set lbl = state_attr('sensor.awtrix_plane', 'label') | default('', true) -%}
+                {%- set alt = state_attr('sensor.awtrix_plane', 'altitude_k') | default('', true) -%}
+                {%- set cs = state_attr('sensor.awtrix_plane', 'callsign') | default('', true) -%}
+                {%- set d = states.sensor.plane_details -%}
+                {%- set fresh = d is not none and d.attributes.get('callsign') == cs
+                                and d.attributes.get('ok') -%}
+                {%- set airline = d.attributes.get('airline') if fresh else none -%}
+                {%- set dest = d.attributes.get('destination') if fresh else none -%}
+                {%- if airline and dest and dest != 'Unknown' -%}
+                {"icon":"21065","duration":0,"lifetime":0,"text":[
+                  {"t":"{{ airline }} ","c":"FFFFFF"},
+                  {"t":">{{ dest }}","c":"00C0FF"}]}
+                {%- elif airline -%}
+                {"icon":"21065","duration":0,"lifetime":0,"text":[
+                  {"t":"{{ airline }} ","c":"FFFFFF"},
+                  {"t":"{{ alt }}","c":"FFA000"}]}
+                {%- else -%}
+                {"icon":"21065","duration":0,"lifetime":0,"text":[
+                  {"t":"{{ lbl }} ","c":"FFFFFF"},
+                  {"t":"{{ alt }}","c":"FFA000"}]}
+                {%- endif -%}
+  mode: queued
+  max: 10
+- id: opensky_poll_window
+  alias: OpenSky - poll during active hours
+  description: >-
+    Drives sensor.opensky_flights instead of letting the command_line platform
+    poll on its own (its scan_interval is 86400 in configuration.yaml, so it
+    effectively never self-polls). This is what makes the polling window
+    configurable by time of day.
+
+    Window and interval are set by the trigger and condition below:
+      every 30 seconds, 06:00 -> 00:30 the following day  = ~2,220 calls/day
+    OpenSky allows 4,000/day on the authenticated tier, so there is plenty of
+    headroom -- the limit is not the constraint here, the window is a choice
+    about when the data is worth having.
+
+    The window crosses midnight. Home Assistant's time condition handles that
+    directly: when "after" is later than "before" it wraps, i.e. the condition
+    is true from 06:00 to 23:59 AND from 00:00 to 00:30. The quiet period is
+    00:30-06:00.
+
+    TO CHANGE THE WINDOW: edit the after/before times in the condition.
+    TO CHANGE THE RATE:   edit the trigger below.
+                          seconds: '/30' = ~2,220 calls/day (56% of the 4,000 quota)
+                          minutes: '/1'  = ~1,110  (28%)
+                          minutes: '/2'  = ~555    (14%)
+                          minutes: '/5'  = ~222    (6%)
+  trigger:
+  - platform: time_pattern
+    seconds: '/30'
+  condition:
+  - condition: time
+    after: '06:00:00'
+    before: '00:30:00'
+  action:
+  - service: homeassistant.update_entity
+    target:
+      entity_id: sensor.opensky_flights
+  mode: single

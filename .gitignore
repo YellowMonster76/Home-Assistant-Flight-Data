@@ -1,0 +1,9 @@
+# Runtime state - never commit
+.opensky_token.json
+.aerodatabox_cache.json
+.plane_log.jsonl
+secrets.yaml
+
+__pycache__/
+*.pyc
+.DS_Store
