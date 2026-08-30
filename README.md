@@ -171,6 +171,20 @@ template split across two lines with extra indentation injects a newline into
 the middle of your command, and Home Assistant fails with exit code 127. Keep
 each template on one line.
 
+**The AWTRIX font has no arrow glyphs, and missing glyphs render as nothing.**
+`↑` (U+2191), `▲` (U+25B2) and `⬆` (U+2B06) each lit zero pixels when tested on
+the panel — they fail silently rather than showing a placeholder. ASCII markers
+work, so the caption uses `^` for altitude and `<>` for distance. Letters are a
+poor choice for markers because `UPPERCASE` is a device-wide setting: with it
+on, a lowercase `d` is drawn as a capital `D`.
+
+**Read the panel, don't guess at it.** `GET /api/screen` returns the live
+framebuffer as 256 integers, which is how all of the above was measured —
+including the scroll period, found by sampling frames and looking for the
+repeat. A ~49-character caption takes 10s for one full pass, and `duration`
+does *not* stretch to finish a scroll: set it to 5 and the text is cut off at
+exactly 5s, mid-word.
+
 **A new AWTRIX app is not shown until the rotation reaches it.** With a ~61 s
 cycle and flyovers lasting a mean 67 s (7 of 18 measured lasted only 30 s),
 roughly half of all aircraft were never actually displayed. The automation

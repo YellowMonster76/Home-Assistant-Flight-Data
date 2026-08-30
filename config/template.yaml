@@ -108,3 +108,24 @@
             {%- if ns.best is none -%}
             {%- else -%}{{ (ns.best.altitude_m / 1000) | round(1) }}k
             {%- endif -%}
+          # Distance to the SAME aircraft the rest of these attributes describe.
+          # Deliberately not sensor.opensky_flights.nearest_km: that is the
+          # nearest aircraft overall, which may be one filtered out here for
+          # being on the ground or above the altitude ceiling.
+          distance_km: >-
+            {%- set ac = state_attr('sensor.opensky_flights', 'aircraft') or [] -%}
+            {%- set maxd = states('input_number.plane_alert_distance') | float(5) -%}
+            {%- set maxa = states('input_number.plane_alert_altitude') | float(3000) -%}
+            {%- set ns = namespace(best=none) -%}
+            {%- for a in ac -%}
+              {%- if a.distance_km is not none and a.altitude_m is not none
+                     and not a.on_ground
+                     and a.distance_km <= maxd and a.altitude_m <= maxa -%}
+                {%- if ns.best is none or a.distance_km < ns.best.distance_km -%}
+                  {%- set ns.best = a -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {%- if ns.best is none -%}
+            {%- else -%}{{ ns.best.distance_km | round(1) }}
+            {%- endif -%}

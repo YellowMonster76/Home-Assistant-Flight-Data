@@ -72,6 +72,7 @@
       origin: "{{ state_attr('sensor.plane_details', 'origin') if fresh else none }}"
       dest: "{{ state_attr('sensor.plane_details', 'destination') if fresh else none }}"
       alt: "{{ state_attr('sensor.awtrix_plane', 'altitude_k') }}"
+      dist: "{{ state_attr('sensor.awtrix_plane', 'distance_km') }}"
   - service: notify.mobile_app_your_phone
     data:
       title: >-
@@ -80,7 +81,7 @@
         {{ cs }}{% if model %} · {{ model }}{% endif %}
         {%- if origin and dest and origin != 'Unknown' %} · {{ origin }} → {{ dest }}
         {%- elif dest and dest != 'Unknown' %} · to {{ dest }}
-        {%- endif %} · {{ alt }} up
+        {%- endif %} · {{ alt }} up{% if dist %} · {{ dist }} km away{% endif %}
       data:
         # Tapping the notification opens the Flights tab in the HA app.
         # iOS uses "url"; Android would need "clickAction" instead.
@@ -194,33 +195,74 @@
               topic: '{{ repeat.item }}/custom/{{ app_name }}'
               qos: 0
               retain: true
-              # Prefers the AeroDataBox enrichment (airline + destination) and
-              # falls back to the OpenSky-only form when that is unavailable --
-              # a private flight, an unknown callsign, or a failed lookup. The
-              # fallback matters: the enrichment is a metered API and must never
-              # be load-bearing.
+              # Carries the same five fields as the phone notification: airline,
+              # callsign, type, route, altitude. Each is appended only if
+              # present, so a partial or failed lookup degrades to a shorter
+              # caption rather than an empty gap -- an unenriched aircraft still
+              # shows "N123AB 1.1k". The enrichment is a metered API and must
+              # never be load-bearing.
+              #
+              # Only AeroDataBox values whose callsign still matches the aircraft
+              # overhead are trusted: sensor.plane_details lags by a poll, so a
+              # stale value would caption the wrong aeroplane. 'fresh' is that
+              # guard. Built as a list and rendered with tojson, so quotes or
+              # non-ASCII in an airline name cannot break the JSON.
+              #
+              # Colours: airline white, callsign grey, type green, route cyan,
+              # altitude amber, distance magenta. Longest realistic string is
+              # ~56 chars; a 49-char one measured 10s for a full scroll pass on
+              # the panel, so ~11.5s here, against duration 30.
+              #
+              # Two prefixes distinguish the two numbers: '^' for altitude (up)
+              # and '<>' for distance (a span). Letters were rejected as markers
+              # because the panel has UPPERCASE enabled device-wide, so a
+              # lowercase 'd' draws as a capital D -- verified by rendering 'd'
+              # and 'D' and comparing framebuffers, which came back identical.
+              # Symbols sidestep that entirely. Note this is also why the 'k' in
+              # the altitude shows as 'K'.
+              # Both prefixes are ASCII by necessity -- the
+              # panel font has no arrow glyph, and U+2191, U+25B2 and U+2B06 were
+              # each tested on the device and lit zero pixels, so a Unicode arrow
+              # would silently render as nothing. Every ASCII candidate tested
+              # (@ ~ - = + < * # .) does draw, so the choice among them is free.
               payload: >-
-                {%- set lbl = state_attr('sensor.awtrix_plane', 'label') | default('', true) -%}
-                {%- set alt = state_attr('sensor.awtrix_plane', 'altitude_k') | default('', true) -%}
                 {%- set cs = state_attr('sensor.awtrix_plane', 'callsign') | default('', true) -%}
+                {%- set alt = state_attr('sensor.awtrix_plane', 'altitude_k') | default('', true) -%}
+                {%- set lbl = state_attr('sensor.awtrix_plane', 'label') | default('', true) -%}
                 {%- set d = states.sensor.plane_details -%}
                 {%- set fresh = d is not none and d.attributes.get('callsign') == cs
                                 and d.attributes.get('ok') -%}
                 {%- set airline = d.attributes.get('airline') if fresh else none -%}
-                {%- set dest = d.attributes.get('destination') if fresh else none -%}
-                {%- if airline and dest and dest != 'Unknown' -%}
-                {"icon":"21065","duration":30,"lifetime":0,"text":[
-                  {"t":"{{ airline }} ","c":"FFFFFF"},
-                  {"t":">{{ dest }}","c":"00C0FF"}]}
-                {%- elif airline -%}
-                {"icon":"21065","duration":30,"lifetime":0,"text":[
-                  {"t":"{{ airline }} ","c":"FFFFFF"},
-                  {"t":"{{ alt }}","c":"FFA000"}]}
+                {%- set model = d.attributes.get('aircraft_model') if fresh else none -%}
+                {%- set org = d.attributes.get('origin') if fresh else none -%}
+                {%- set dst = d.attributes.get('destination') if fresh else none -%}
+                {%- set dist = state_attr('sensor.awtrix_plane', 'distance_km') | default('', true) -%}
+                {%- set ns = namespace(f=[]) -%}
+                {%- if airline -%}
+                {%- set ns.f = ns.f + [{'t': airline, 'c': 'FFFFFF'}] -%}
+                {%- set ns.f = ns.f + [{'t': cs, 'c': '909090'}] -%}
                 {%- else -%}
-                {"icon":"21065","duration":30,"lifetime":0,"text":[
-                  {"t":"{{ lbl }} ","c":"FFFFFF"},
-                  {"t":"{{ alt }}","c":"FFA000"}]}
+                {%- set ns.f = ns.f + [{'t': (lbl if lbl else cs), 'c': 'FFFFFF'}] -%}
                 {%- endif -%}
+                {%- if model -%}
+                {%- set ns.f = ns.f + [{'t': model, 'c': '00D060'}] -%}
+                {%- endif -%}
+                {%- if org and dst and org != 'Unknown' and dst != 'Unknown' -%}
+                {%- set ns.f = ns.f + [{'t': org ~ '>' ~ dst, 'c': '00C0FF'}] -%}
+                {%- elif dst and dst != 'Unknown' -%}
+                {%- set ns.f = ns.f + [{'t': '>' ~ dst, 'c': '00C0FF'}] -%}
+                {%- endif -%}
+                {%- if alt -%}
+                {%- set ns.f = ns.f + [{'t': '^' ~ alt, 'c': 'FFA000'}] -%}
+                {%- endif -%}
+                {%- if dist -%}
+                {%- set ns.f = ns.f + [{'t': '<>' ~ dist ~ 'km', 'c': 'FF60B0'}] -%}
+                {%- endif -%}
+                {%- set out = namespace(l=[]) -%}
+                {%- for x in ns.f -%}
+                {%- set out.l = out.l + [{'t': x.t ~ (' ' if not loop.last else ''), 'c': x.c}] -%}
+                {%- endfor -%}
+                {"icon":"21065","duration":30,"lifetime":0,"text":{{ out.l | tojson }}}
       # Jump straight to the app when it FIRST appears, rather than waiting for
       # the rotation to reach it. Measured over 10 hours: appearances average
       # 67 s but 7 of 18 lasted only 30 s, against a ~61 s rotation cycle -- so
