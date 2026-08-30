@@ -171,6 +171,13 @@ template split across two lines with extra indentation injects a newline into
 the middle of your command, and Home Assistant fails with exit code 127. Keep
 each template on one line.
 
+**A new AWTRIX app is not shown until the rotation reaches it.** With a ~61 s
+cycle and flyovers lasting a mean 67 s (7 of 18 measured lasted only 30 s),
+roughly half of all aircraft were never actually displayed. The automation
+publishes to `<topic>/switch` on first appearance to jump straight to the app,
+and sets `duration: 30` so there is time to read it. Raising `duration` past
+about 60 buys nothing — the aircraft has usually left before the turn ends.
+
 **`command_line` needs a restart**, both to create a sensor and to pick up
 changes to `json_attributes`.
 

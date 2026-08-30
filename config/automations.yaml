@@ -126,6 +126,12 @@
     draw clips at the panel edge whereas fragments scroll. With the icon this
     string is ~37px against a 32px panel, so it will scroll; that is expected.
 
+    duration 30 (the AWTRIX global ATIME here is 7s): measured over 10 hours, a
+    flyover lasts a mean 67s, so 30s covers roughly half of it and allows ~4
+    scroll passes. The cost is the rotation stretching from 71s to 86s while an
+    aircraft is overhead -- other apps still come round inside 90s. Above ~60s
+    buys nothing, because the aircraft has usually left before the turn ends.
+
     Rollback: delete this automation and the app disappears once
     input_boolean.awtrix_plane is turned off.
   trigger:
@@ -203,18 +209,35 @@
                 {%- set airline = d.attributes.get('airline') if fresh else none -%}
                 {%- set dest = d.attributes.get('destination') if fresh else none -%}
                 {%- if airline and dest and dest != 'Unknown' -%}
-                {"icon":"21065","duration":0,"lifetime":0,"text":[
+                {"icon":"21065","duration":30,"lifetime":0,"text":[
                   {"t":"{{ airline }} ","c":"FFFFFF"},
                   {"t":">{{ dest }}","c":"00C0FF"}]}
                 {%- elif airline -%}
-                {"icon":"21065","duration":0,"lifetime":0,"text":[
+                {"icon":"21065","duration":30,"lifetime":0,"text":[
                   {"t":"{{ airline }} ","c":"FFFFFF"},
                   {"t":"{{ alt }}","c":"FFA000"}]}
                 {%- else -%}
-                {"icon":"21065","duration":0,"lifetime":0,"text":[
+                {"icon":"21065","duration":30,"lifetime":0,"text":[
                   {"t":"{{ lbl }} ","c":"FFFFFF"},
                   {"t":"{{ alt }}","c":"FFA000"}]}
                 {%- endif -%}
+      # Jump straight to the app when it FIRST appears, rather than waiting for
+      # the rotation to reach it. Measured over 10 hours: appearances average
+      # 67 s but 7 of 18 lasted only 30 s, against a ~61 s rotation cycle -- so
+      # roughly half of all flyovers were never displayed at all. Only on the
+      # 'On' trigger: re-switching on every altitude change would hijack the
+      # display for the whole time an aircraft is overhead.
+      - condition: trigger
+        id: 'On'
+      - repeat:
+          for_each: '{{ topics }}'
+          sequence:
+          - service: mqtt.publish
+            data:
+              topic: '{{ repeat.item }}/switch'
+              qos: 0
+              retain: false
+              payload: '{"name": "{{ app_name }}"}'
   mode: queued
   max: 10
 - id: opensky_poll_window
